@@ -42,7 +42,7 @@
     <h1>${isQuote ? 'Quote' : 'Invoice'} <span class="mono">${esc(doc.number)}</span> <span class="pill s-${esc(doc.status)}">${esc(doc.status)}</span>
     ${doc.created_via === 'claude' ? '<span class="src claude">✶ Written by Claude</span>' : ''}</h1></div>
   <div class="actions">
-    <span id="savestate" class="muted small">All changes saved</span>
+    <button class="btn primary save" data-save disabled>✓ Saved</button>
     <a class="btn" href="${esc(doc.public_url)}" target="_blank">Client view ↗</a>
     <button class="btn" id="copy">Copy client link</button>
   </div>
@@ -79,7 +79,7 @@
       </div>
       <label class="full">Terms<textarea class="in" data-f="terms" rows="2">${esc(d.terms)}</textarea></label>
     </details>
-    <div class="danger"><button class="link" id="del">Delete ${doc.kind}</button></div>
+    <div class="savebar"><button class="btn primary save" data-save disabled>✓ Saved</button><span class="muted small">Changes also save automatically.</span><button class="link del" id="del">Delete ${doc.kind}</button></div>
   </div>
   <aside class="card"><h3>Activity</h3><ul class="feed" id="feed"></ul>
     <p class="muted small">Claude sees this same history, so it knows what you changed by hand.</p></aside>
@@ -105,21 +105,30 @@
 
   function autosize() { document.querySelectorAll('textarea.desc').forEach((t) => { t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; }); }
 
+  function setSave(mode, msg) {
+    document.querySelectorAll('[data-save]').forEach((b) => {
+      b.disabled = mode !== 'dirty' && mode !== 'error';
+      b.classList.toggle('pending', mode === 'dirty' || mode === 'error');
+      b.textContent = mode === 'dirty' ? 'Save changes' : mode === 'saving' ? 'Saving…' : mode === 'error' ? '⚠ Retry save' : '✓ Saved';
+      b.title = msg || '';
+    });
+  }
+
   function markDirty() {
-    dirty = true; document.getElementById('savestate').textContent = 'Editing…';
-    renderSum(); clearTimeout(timer); timer = setTimeout(save, 900);
+    dirty = true; setSave('dirty');
+    renderSum(); clearTimeout(timer); timer = setTimeout(save, 2000);
   }
 
   async function save() {
     if (saving) { timer = setTimeout(save, 400); return; }
-    saving = true; document.getElementById('savestate').textContent = 'Saving…';
+    saving = true; setSave('saving');
     const d = state.doc.data;
     try {
       const r = await api('PUT', `/api/documents/${id}`, { title: d.title, client: d.client, issue_date: d.issue_date, due_date: d.due_date, items: d.items, currency: d.currency, discount: +d.discount || 0, tax_rate: +d.tax_rate || 0, tax_label: d.tax_label, notes: d.notes, terms: d.terms });
       state.doc = { ...state.doc, ...r.doc }; lastSeen = r.doc.updated_at; dirty = false;
-      document.getElementById('savestate').textContent = 'Saved ✓';
+      setSave('saved');
       refreshMeta();
-    } catch (e) { document.getElementById('savestate').textContent = '⚠ ' + e.message; }
+    } catch (e) { setSave('error', e.message); alert('Could not save: ' + e.message); }
     saving = false;
   }
 
@@ -146,6 +155,7 @@
     const cv = document.getElementById('convert');
     if (cv) cv.onclick = async () => { if (dirty) await save(); const r = await api('POST', `/api/documents/${id}/convert`); location.href = `/app/doc/${r.doc.id}`; };
     document.getElementById('del').onclick = async () => { if (!confirm(`Delete ${state.doc.number}? This can't be undone.`)) return; await api('DELETE', `/api/documents/${id}`); location.href = '/app'; };
+    document.querySelectorAll('[data-save]').forEach((b) => b.onclick = () => { clearTimeout(timer); save(); });
     document.onkeydown = (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); clearTimeout(timer); save(); } };
   }
 
@@ -164,6 +174,8 @@
       setTimeout(() => { b.hidden = true; }, 6000);
     } catch {}
   }, 3000);
+
+  window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
 
   load().catch((e) => { root.innerHTML = `<div class="card">Could not load: ${esc(e.message)}</div>`; });
 })();
