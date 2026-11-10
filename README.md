@@ -16,7 +16,7 @@ Paydraft is a billing desk for your own Claude. You describe the work in plain w
 1. In claude.ai, go to **Settings → Connectors → Add custom connector**.
 2. Name it **Paydraft** and paste your MCP URL. No OAuth is needed. Click **Add**.
 3. In a chat, turn on Paydraft in the tools menu and ask:
-   *"Invoice Acme Robotics for 32 hours of product design at $95/hr plus a $240 testing tool, 18% GST, due in 15 days."*
+   *"Invoice Acme Robotics for 32 hours of product design at ₹2,500/hr plus ₹6,000 for a testing tool, due in 15 days."*
 4. Open the `edit_url` Claude returns. The invoice is there, and you can edit it. Changes made in either place show up live in the other.
 
 ## MCP tools
@@ -24,7 +24,7 @@ Paydraft is a billing desk for your own Claude. You describe the work in plain w
 |---|---|
 | `create_invoice` / `create_quote` | Store a document Claude wrote. Returns totals, an edit link and a client link |
 | `update_document` | Patch any field, or replace the line items |
-| `set_status` | draft / sent / paid / void, or accepted / declined for quotes |
+| `set_status` | Invoices: unpaid / paid. Quotes: pending / accepted |
 | `convert_quote_to_invoice` | Turn an accepted quote into an invoice |
 | `list_documents`, `get_document` | Read back documents, including the activity history of edits made by hand in the app |
 | `get_receivables` | Outstanding, overdue and paid totals, plus the overdue list, so Claude can write reminders |

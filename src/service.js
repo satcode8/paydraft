@@ -12,76 +12,78 @@ async function findDoc(user, ref) {
   return doc;
 }
 
-async function createDoc(user, kind, input, source) {
+async function createDoc(user, kind, input, source, extra = {}) {
   if (!['invoice', 'quote'].includes(kind)) throw new UserError('kind must be "invoice" or "quote"');
+  const b = user.business || {};
   const defaults = {
-    currency: user.business.default_currency || 'USD',
-    tax_rate: user.business.default_tax_rate ?? 0,
-    tax_label: user.business.default_tax_label || 'Tax',
-    terms: kind === 'invoice' ? (user.business.default_terms || '') : '',
+    currency: b.default_currency || 'INR',
+    tax_rate: b.default_tax_rate ?? 18,
+    tax_label: b.default_tax_label || 'GST',
+    terms: kind === 'invoice' ? (b.default_terms || '') : '',
   };
   const data = M.normalise(kind, { ...defaults, ...input });
-  const doc = await db.documents.create(user.id, kind, data, source);
-  await db.events.add(doc.id, source, 'created', `${kind} ${doc.number} created`);
+  const doc = await db.documents.create(user.id, kind, data, source, { status: M.DEFAULT_STATUS[kind], ...extra });
+  await db.events.add(doc.id, source, 'created', `${kind === 'quote' ? 'Quote' : 'Invoice'} ${doc.number} created`);
   return doc;
 }
 
+const LABEL = { items: 'line items', client: 'client details', issue_date: 'issue date', due_date: 'due date', tax_rate: 'GST %', tax_label: 'tax label' };
+
 async function updateDoc(user, ref, patch, source) {
   const doc = await findDoc(user, ref);
-  if (doc.status === 'void') throw new UserError(`${doc.number} is void and can't be edited.`);
+  const before = M.normalise(doc.kind, {}, doc.data);
   const data = M.normalise(doc.kind, patch, doc.data);
-  const before = M.totals(doc.data).total, after = M.totals(data).total;
-  const updated = await db.documents.update(user.id, doc.id, data);
-  const LABEL = { items: 'line items', client: 'client details', issue_date: 'issue date', due_date: 'due date', tax_rate: 'tax rate', tax_label: 'tax label' };
-  const changed = Object.keys(data).filter((k) => JSON.stringify(data[k]) !== JSON.stringify(M.normalise(doc.kind, {}, doc.data)[k]));
+  const changed = Object.keys(data).filter((k) => JSON.stringify(data[k]) !== JSON.stringify(before[k]));
   if (!changed.length) return doc;
-  let detail = `Edited ${changed.map((k) => LABEL[k] || k).join(', ')}`;
-  if (before !== after) detail += ` · total ${M.money(before, doc.data.currency)} → ${M.money(after, data.currency)}`;
+  const t0 = M.totals(before).total, t1 = M.totals(data).total;
+  const updated = await db.documents.update(user.id, doc.id, data);
+  let detail = `Edited ${changed.map((k) => LABEL[k] || k.replace(/_/g, ' ')).join(', ')}`;
+  if (t0 !== t1) detail += ` · total ${M.money(t0, before.currency)} → ${M.money(t1, data.currency)}`;
   await db.events.add(doc.id, source, 'edited', detail);
   return updated;
 }
 
 async function setStatus(user, ref, status, source) {
   const doc = await findDoc(user, ref);
-  const allowed = M.STATUSES[doc.kind];
-  if (!allowed.includes(status)) throw new UserError(`Status for a ${doc.kind} must be one of: ${allowed.join(', ')}`);
-  if (status === 'converted') throw new UserError('Use convert_quote_to_invoice to convert a quote.');
-  let updated = await db.documents.setStatus(doc.id, status);
+  const next = M.canonicalStatus(doc.kind, status);
+  if (!next) throw new UserError(`A ${doc.kind} can be: ${M.STATUSES[doc.kind].join(' or ')}.`);
+  if (next === doc.status) return doc;
+  let updated = await db.documents.setStatus(doc.id, next);
   if (doc.kind === 'invoice') {
     const data = { ...doc.data };
-    if (status === 'paid') { data.paid_at = M.today(); data.paid_amount = M.totals(doc.data).total; }
+    if (next === 'paid') { data.paid_at = M.today(); data.paid_amount = M.totals(doc.data).total; }
     else { data.paid_at = null; data.paid_amount = null; }
     updated = await db.documents.update(user.id, doc.id, data);
   }
-  await db.events.add(doc.id, source, 'status', `${doc.status} → ${status}`);
+  await db.events.add(doc.id, source, 'status', `Marked ${next}`);
   return updated;
 }
 
 async function convertQuote(user, ref, source) {
   const quote = await findDoc(user, ref);
   if (quote.kind !== 'quote') throw new UserError(`${quote.number} is not a quote.`);
-  if (quote.status === 'converted') throw new UserError(`${quote.number} was already converted.`);
-  const data = { ...quote.data, issue_date: M.today(), due_date: M.addDays(M.today(), 14),
-    terms: quote.data.terms || user.business.default_terms || '' };
-  const inv = await db.documents.create(user.id, 'invoice', M.normalise('invoice', data), source, { source_quote_id: quote.id });
-  await db.documents.setStatus(quote.id, 'converted');
-  await db.events.add(quote.id, source, 'converted', `Converted to ${inv.number}`);
-  await db.events.add(inv.id, source, 'created', `Created from quote ${quote.number}`);
+  if (quote.data.invoice_number) throw new UserError(`${quote.number} was already turned into ${quote.data.invoice_number}.`);
+  const data = { ...quote.data, invoice_number: null, issue_date: M.today(), due_date: M.addDays(M.today(), 14),
+    terms: quote.data.terms || (user.business || {}).default_terms || '' };
+  const inv = await db.documents.create(user.id, 'invoice', M.normalise('invoice', data), source, { status: 'unpaid', source_quote_id: quote.id });
+  await db.documents.setStatus(quote.id, 'accepted');
+  await db.documents.update(user.id, quote.id, { ...quote.data, invoice_number: inv.number });
+  await db.events.add(quote.id, source, 'converted', `Turned into invoice ${inv.number}`);
+  await db.events.add(inv.id, source, 'created', `Invoice ${inv.number} created from quote ${quote.number}`);
   return inv;
 }
 
 async function receivables(user) {
   const docs = (await db.documents.list(user.id)).filter((d) => d.kind === 'invoice');
   const byCur = {};
-  const bucket = (c) => (byCur[c] ||= { outstanding: 0, overdue: 0, paid_last_30_days: 0, draft: 0 });
+  const bucket = (c) => (byCur[c] ||= { to_collect: 0, overdue: 0, paid_last_30_days: 0 });
   const overdue = [];
   const since = M.addDays(M.today(), -30);
   for (const d of docs) {
     const t = M.totals(d.data).total; const b = bucket(d.data.currency); const st = M.effectiveStatus(d);
-    if (st === 'sent' || st === 'overdue') b.outstanding += t;
+    if (st === 'unpaid' || st === 'overdue') b.to_collect += t;
     if (st === 'overdue') { b.overdue += t; overdue.push(M.present(d)); }
     if (st === 'paid' && (d.data.paid_at || '') >= since) b.paid_last_30_days += t;
-    if (st === 'draft') b.draft += t;
   }
   for (const c in byCur) for (const k in byCur[c]) byCur[c][k] = Math.round(byCur[c][k] * 100) / 100;
   overdue.sort((a, b) => b.days_overdue - a.days_overdue);

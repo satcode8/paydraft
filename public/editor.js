@@ -5,7 +5,7 @@
   let dirty = false, saving = false, timer = null, lastSeen = null;
 
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const money = (n, c) => { try { return new Intl.NumberFormat('en-US', { style: 'currency', currency: c || 'USD' }).format(n || 0); } catch { return (c || '') + ' ' + Number(n || 0).toFixed(2); } };
+  const money = (n, c) => { try { return new Intl.NumberFormat(c === 'INR' || !c ? 'en-IN' : 'en-US', { style: 'currency', currency: c || 'INR' }).format(n || 0); } catch { return (c || '') + ' ' + Number(n || 0).toFixed(2); } };
   const ago = (t) => { const s = (Date.now() - new Date(t)) / 1000; if (s < 60) return 'just now'; if (s < 3600) return Math.floor(s / 60) + 'm ago'; if (s < 86400) return Math.floor(s / 3600) + 'h ago'; return new Date(t).toLocaleDateString(); };
   const srcBadge = (s) => s === 'claude' ? '<span class="src claude">✶ Claude</span>' : s === 'client' ? '<span class="src client">Client</span>' : '<span class="src you">You</span>';
   const api = async (method, url, body) => {
@@ -30,9 +30,12 @@
       <td><button class="x" title="Remove line" data-del="${i}">×</button></td></tr>`;
   }
 
+  const LABELS = { unpaid: 'Unpaid', paid: '✓ Paid', pending: 'Pending', accepted: '✓ Accepted' };
+
   function render() {
     const { doc, statuses } = state; const d = doc.data; const isQuote = doc.kind === 'quote';
     document.title = `${doc.number} · Paydraft`;
+    const more = !!(d.discount || d.currency !== 'INR' || d.tax_label !== 'GST');
     root.innerHTML = `
 <section class="page-head">
   <div><a href="/app" class="muted small">← All documents</a>
@@ -47,35 +50,39 @@
 <div id="live" class="banner live" hidden></div>
 <section class="grid2 editor-grid">
   <div class="card">
-    <div class="statusbar">${statuses.filter((s) => s !== 'converted').map((s) => `<button class="chip ${doc.stored_status === s ? 'on' : ''}" data-status="${s}">${s === 'paid' ? '✓ Paid' : s[0].toUpperCase() + s.slice(1)}</button>`).join('')}
-      ${isQuote && doc.stored_status !== 'converted' ? '<button class="chip accent" id="convert">Convert to invoice →</button>' : ''}</div>
-    <label class="full">Title<input class="in" data-f="title" value="${esc(d.title)}" placeholder="e.g. March design retainer"></label>
+    <div class="statusbar">${statuses.map((s) => `<button class="chip ${doc.stored_status === s ? 'on' : ''}" data-status="${s}">${LABELS[s] || s}</button>`).join('')}
+      ${isQuote ? (d.invoice_number ? `<span class="chip-note">Invoiced as <b>${esc(d.invoice_number)}</b></span>` : '<button class="chip accent" id="convert">Turn into invoice →</button>') : ''}</div>
     <div class="form-grid">
-      <label>Client name<input class="in" data-c="name" value="${esc(d.client.name)}"></label>
-      <label>Client email<input class="in" data-c="email" value="${esc(d.client.email)}"></label>
-      <label>Client address<textarea class="in" data-c="address" rows="2">${esc(d.client.address)}</textarea></label>
-      <label>Client tax ID<input class="in" data-c="tax_id" value="${esc(d.client.tax_id)}"></label>
-      <label>Issue date<input class="in" type="date" data-f="issue_date" value="${esc(d.issue_date)}"></label>
-      <label>${isQuote ? 'Valid until' : 'Due date'}<input class="in" type="date" data-f="due_date" value="${esc(d.due_date)}"></label>
+      <label>Client<input class="in" data-c="name" value="${esc(d.client.name)}" placeholder="Company or person"></label>
+      <label>Client email<input class="in" data-c="email" value="${esc(d.client.email)}" placeholder="Optional"></label>
     </div>
-    <table class="items"><thead><tr><th>Description</th><th class="r">Qty</th><th class="r">Rate</th><th class="r">Amount</th><th></th></tr></thead>
+    <table class="items"><thead><tr><th>What you did</th><th class="r">Qty</th><th class="r">Rate</th><th class="r">Amount</th><th></th></tr></thead>
       <tbody id="items">${d.items.map(itemRow).join('')}</tbody></table>
     <button class="btn small" id="addline">+ Add line</button>
     <div class="totals-row">
-      <div class="form-grid three">
-        <label>Currency<input class="in" data-f="currency" maxlength="3" value="${esc(d.currency)}"></label>
-        <label>Discount<input class="in" type="number" step="0.01" data-f="discount" value="${esc(d.discount)}"></label>
-        <label>Tax %<input class="in" type="number" step="any" data-f="tax_rate" value="${esc(d.tax_rate)}"></label>
-        <label>Tax label<input class="in" data-f="tax_label" value="${esc(d.tax_label)}"></label>
+      <div class="form-grid">
+        <label>GST %<input class="in" type="number" step="any" data-f="tax_rate" value="${esc(d.tax_rate)}"></label>
+        <label>${isQuote ? 'Valid until' : 'Due date'}<input class="in" type="date" data-f="due_date" value="${esc(d.due_date)}"></label>
       </div>
       <table class="sum" id="sum"></table>
     </div>
-    <label class="full">Notes to client<textarea class="in" data-f="notes" rows="3">${esc(d.notes)}</textarea></label>
-    <label class="full">Terms<textarea class="in" data-f="terms" rows="3">${esc(d.terms)}</textarea></label>
+    <label class="full">Note to client<textarea class="in" data-f="notes" rows="2" placeholder="Optional, e.g. Thanks for the great collaboration!">${esc(d.notes)}</textarea></label>
+    <details class="more" ${more ? 'open' : ''}><summary>More options</summary>
+      <label class="full">Title<input class="in" data-f="title" value="${esc(d.title)}" placeholder="e.g. March design retainer"></label>
+      <div class="form-grid">
+        <label>Client address<textarea class="in" data-c="address" rows="2">${esc(d.client.address)}</textarea></label>
+        <label>Client GSTIN / tax ID<input class="in" data-c="tax_id" value="${esc(d.client.tax_id)}"></label>
+        <label>Issue date<input class="in" type="date" data-f="issue_date" value="${esc(d.issue_date)}"></label>
+        <label>Discount (₹ amount)<input class="in" type="number" step="0.01" data-f="discount" value="${esc(d.discount)}"></label>
+        <label>Currency<input class="in" data-f="currency" maxlength="3" value="${esc(d.currency)}"></label>
+        <label>Tax name<input class="in" data-f="tax_label" value="${esc(d.tax_label)}"></label>
+      </div>
+      <label class="full">Terms<textarea class="in" data-f="terms" rows="2">${esc(d.terms)}</textarea></label>
+    </details>
     <div class="danger"><button class="link" id="del">Delete ${doc.kind}</button></div>
   </div>
   <aside class="card"><h3>Activity</h3><ul class="feed" id="feed"></ul>
-    <p class="muted small">Claude sees this same history through <code>get_document</code>, so it knows what you changed by hand.</p></aside>
+    <p class="muted small">Claude sees this same history, so it knows what you changed by hand.</p></aside>
 </section>`;
     renderSum(); renderFeed(); bind(); autosize();
   }

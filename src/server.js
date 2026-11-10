@@ -44,7 +44,7 @@ app.post('/signup', wrap(async (req, res) => {
   const { name, email, password, business } = req.body;
   if (!email || !password || password.length < 6) return res.status(400).send(V.authPage('signup', 'Email and a 6+ character password are required.', req.body));
   if (await db.users.byEmail(email)) return res.status(400).send(V.authPage('signup', 'That email already has an account.', req.body));
-  const u = await db.users.create(email, name || '', await bcrypt.hash(password, 10), business ? { name: business, email } : { email });
+  const u = await db.users.create(email, name || '', await bcrypt.hash(password, 10), { ...(business ? { name: business } : {}), email, default_currency: 'INR', default_tax_rate: 18, default_tax_label: 'GST' });
   res.cookie(COOKIE, await db.sessions.create(u.id), cookieOpts).redirect('/app/connect');
 }));
 app.post('/logout', wrap(async (req, res) => {
@@ -64,8 +64,9 @@ app.post('/app/settings', needUser, wrap(async (req, res) => {
   const keys = ['name', 'email', 'phone', 'address', 'tax_id', 'payment_instructions', 'default_currency', 'default_tax_label', 'default_terms'];
   const b = { ...req.user.business };
   for (const k of keys) b[k] = String(req.body[k] || '').slice(0, 2000);
-  b.default_currency = (b.default_currency || 'USD').toUpperCase().slice(0, 3);
-  b.default_tax_rate = Number(req.body.default_tax_rate) || 0;
+  b.default_currency = (b.default_currency || 'INR').toUpperCase().slice(0, 3);
+  b.default_tax_rate = req.body.default_tax_rate === '' ? 18 : Number(req.body.default_tax_rate) || 0;
+  b.default_tax_label = b.default_tax_label || 'GST';
   await db.users.setBusiness(req.user.id, b);
   res.redirect('/app/settings?saved=1');
 }));
@@ -107,34 +108,39 @@ app.get('/p/:pid', wrap(async (req, res) => {
 }));
 app.post('/p/:pid/respond', wrap(async (req, res) => {
   const doc = await db.documents.byPublicId(req.params.pid);
-  if (!doc || doc.kind !== 'quote' || doc.status !== 'sent') return res.redirect(`/p/${req.params.pid}`);
-  const status = req.body.decision === 'accept' ? 'accepted' : 'declined';
-  await db.documents.setStatus(doc.id, status);
-  await db.events.add(doc.id, 'client', 'status', `Client ${status} the quote`);
+  if (!doc || doc.kind !== 'quote' || doc.status !== 'pending' || req.body.decision !== 'accept') return res.redirect(`/p/${req.params.pid}`);
+  await db.documents.setStatus(doc.id, 'accepted');
+  await db.events.add(doc.id, 'client', 'status', 'Client accepted the quote');
   res.redirect(`/p/${req.params.pid}?r=1`);
 }));
 
 app.use((err, req, res, next) => { console.error(err); res.status(500).send('Something went wrong'); });
 
 // ---------- demo seed ----------
+const SEED_VERSION = 2; // bump to reset the demo account's sample data on next boot
 async function seed() {
-  if (await db.users.byEmail('demo@paydraft.app')) return;
-  const u = await db.users.create('demo@paydraft.app', 'Demo Reviewer', await bcrypt.hash('demo1234', 10), {
+  const business = {
     name: 'Studio Saffron', email: 'billing@studiosaffron.in', phone: '+91 98450 12345',
-    address: '42 Residency Road\nBengaluru, KA 560025, India', tax_id: 'GSTIN 29ABCDE1234F1Z5',
+    address: '42 Residency Road\nBengaluru, KA 560025', tax_id: 'GSTIN 29ABCDE1234F1Z5',
     payment_instructions: 'Bank transfer: HDFC Bank · A/C 50100123456789 · IFSC HDFC0000123\nUPI: studiosaffron@hdfc',
-    default_currency: 'USD', default_tax_rate: 0, default_tax_label: 'GST',
+    default_currency: 'INR', default_tax_rate: 18, default_tax_label: 'GST',
     default_terms: 'Payment due within 14 days of the invoice date. Thank you for your business!',
-  });
-  const mk = async (kind, data, via, status) => { const d = await S.createDoc(u, kind, data, via); if (status) await S.setStatus(u, d.id, status, 'app'); return d; };
-  await mk('invoice', { client: { name: 'Northwind Traders', email: 'ap@northwind.example', address: '1 Harbour St\nSingapore 049319' }, title: 'February design retainer',
-    issue_date: M.addDays(M.today(), -40), due_date: M.addDays(M.today(), -26), items: [{ description: 'Product design retainer (February)', quantity: 1, unit_price: 2800 }, { description: 'Additional prototype hours', quantity: 6, unit_price: 90 }] }, 'claude', 'sent');
+    seed_version: SEED_VERSION,
+  };
+  let u = await db.users.byEmail('demo@paydraft.app');
+  if (u && (u.business || {}).seed_version === SEED_VERSION) return;
+  if (u) { await db.pool.query('DELETE FROM documents WHERE user_id=$1', [u.id]); u = await db.users.setBusiness(u.id, business); }
+  else u = await db.users.create('demo@paydraft.app', 'Demo Reviewer', await bcrypt.hash('demo1234', 10), business);
+  const mk = async (kind, data, status) => { const d = await S.createDoc(u, kind, data, 'claude'); if (status) await S.setStatus(u, d.id, status, 'app'); return d; };
+  await mk('invoice', { client: { name: 'Northwind Traders Pvt Ltd', email: 'accounts@northwind.example', address: '14 MG Road\nPune, MH 411001' }, title: 'September design retainer',
+    issue_date: M.addDays(M.today(), -40), due_date: M.addDays(M.today(), -26),
+    items: [{ description: 'Product design retainer (September)', quantity: 1, unit_price: 120000 }, { description: 'Additional prototype hours', quantity: 6, unit_price: 2000 }] });
   await mk('invoice', { client: { name: 'Lumen Health', email: 'finance@lumen.example' }, title: 'Onboarding flow audit',
-    issue_date: M.addDays(M.today(), -20), items: [{ description: 'UX audit of onboarding (12 screens)', quantity: 1, unit_price: 1500 }, { description: 'Findings workshop, 2 hours', quantity: 2, unit_price: 150 }] }, 'claude', 'paid');
+    issue_date: M.addDays(M.today(), -20), items: [{ description: 'UX audit of onboarding (12 screens)', quantity: 1, unit_price: 75000 }, { description: 'Findings workshop (2 hours)', quantity: 2, unit_price: 5000 }] }, 'paid');
   await mk('quote', { client: { name: 'Kestrel Logistics', email: 'ops@kestrel.example' }, title: 'Driver app redesign – discovery',
-    items: [{ description: 'Stakeholder interviews (6)', quantity: 6, unit_price: 120 }, { description: 'Journey map & opportunity report', quantity: 1, unit_price: 1400 }],
-    notes: 'Happy to start the week after acceptance.', terms: '50% upfront, 50% on delivery. Valid for 30 days.' }, 'claude', 'sent');
-  console.log('Seeded demo account demo@paydraft.app / demo1234');
+    items: [{ description: 'Stakeholder interviews', quantity: 6, unit_price: 6000 }, { description: 'Journey map & opportunity report', quantity: 1, unit_price: 60000 }],
+    notes: 'Happy to start the week after acceptance.', terms: '50% upfront, 50% on delivery. Valid for 30 days.' });
+  console.log('Seeded demo account demo@paydraft.app / demo1234 (v' + SEED_VERSION + ')');
 }
 
 const port = process.env.PORT || 3000;

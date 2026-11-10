@@ -31,13 +31,13 @@ function landing() {
   <div class="cta"><a class="btn primary" href="/signup">Create free account</a><a class="btn" href="/login">Log in</a></div>
   <div class="demo-cred">Reviewer login: <code>demo@paydraft.app</code> / <code>demo1234</code></div>
   <div class="chat-sample">
-    <div class="bubble you">Invoice Acme Robotics for the March retainer: 32 hours of product design at $95/hr, and the $240 usability-testing tool. 18% GST, due in 15 days.</div>
-    <div class="bubble claude"><b>Created INV-0007 · $3,869.92</b><br>3 line items, GST 18%, due 25 Mar.<br><span class="lnk">Edit in Paydraft ↗</span> · <span class="lnk">Client link ↗</span></div>
+    <div class="bubble you">Invoice Acme Robotics for the March retainer: 32 hours of product design at ₹2,500/hr, plus ₹6,000 for the usability-testing tool. Due in 15 days.</div>
+    <div class="bubble claude"><b>Created INV-0007 · ₹1,01,480.00</b><br>2 line items + 18% GST, due 25 Mar.<br><span class="lnk">Edit in Paydraft ↗</span> · <span class="lnk">Client link ↗</span></div>
   </div>
   <ol class="how">
     <li><b>Connect.</b> Paste your private Paydraft link into Claude → Settings → Connectors.</li>
-    <li><b>Ask.</b> "Quote Northwind for a 3-page brand refresh." Claude writes the scope and prices.</li>
-    <li><b>Own it.</b> Edit in Paydraft, send the live link, mark it paid. Claude can see it all too.</li>
+    <li><b>Ask.</b> "Quote Northwind ₹1.5 lakh for a brand refresh." Claude writes the scope and line items.</li>
+    <li><b>Get paid.</b> Edit in Paydraft, send the client link, mark it paid. Claude can see it all too.</li>
   </ol>
   <p class="fine">No AI runs inside Paydraft and there are no model keys. Your Claude does the thinking and Paydraft does the bookkeeping.</p>
 </div></body></html>`;
@@ -62,15 +62,14 @@ function authPage(mode, error = '', values = {}) {
 function dashboard(user) {
   return shell(user, 'Documents', 'docs', `
 <section class="page-head">
-  <div><h1>Documents</h1><p class="muted">Everything Claude or you created. This page updates live.</p></div>
+  <div><h1>Documents</h1><p class="muted">Everything you or Claude created. Updates live.</p></div>
   <div class="actions"><a class="btn" href="/app/new?kind=quote">New quote</a><a class="btn primary" href="/app/new?kind=invoice">New invoice</a></div>
 </section>
-<section class="stats" id="stats"></section>
+<section class="stats two" id="stats"></section>
 <section class="grid2">
   <div class="card flush"><div class="filters" id="filters">
-    <button data-f="all" class="on">All</button><button data-f="invoice">Invoices</button><button data-f="quote">Quotes</button>
-    <button data-f="overdue">Overdue</button><button data-f="claude">✶ By Claude</button></div>
-    <table class="docs"><thead><tr><th>Number</th><th>Client</th><th>Status</th><th>Due</th><th class="r">Total</th></tr></thead><tbody id="rows"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody></table>
+    <button data-f="all" class="on">All</button><button data-f="invoice">Invoices</button><button data-f="quote">Quotes</button></div>
+    <table class="docs"><thead><tr><th>Number</th><th>Client</th><th>Status</th><th>Due</th><th class="r">Amount</th></tr></thead><tbody id="rows"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody></table>
   </div>
   <aside class="card"><h3>Live activity</h3><ul class="feed" id="feed"></ul></aside>
 </section>
@@ -92,7 +91,7 @@ ${saved ? '<div class="banner ok">Saved.</div>' : ''}
 <form method="post" class="card form-grid">
   ${f('name', 'Business name', 'Studio Saffron')}${f('email', 'Billing email')}${f('phone', 'Phone')}${f('tax_id', 'Tax ID (GSTIN / VAT)')}
   ${t('address', 'Address')}${t('payment_instructions', 'Payment instructions', 'Bank: HDFC · A/C 50100… · IFSC HDFC0001234 · UPI studio@hdfc')}
-  ${f('default_currency', 'Default currency', 'USD')}${f('default_tax_rate', 'Default tax %', '18', 'number')}${f('default_tax_label', 'Tax label', 'GST')}
+  ${f('default_currency', 'Default currency', 'INR')}${f('default_tax_rate', 'Default GST %', '18', 'number')}${f('default_tax_label', 'Tax label', 'GST')}
   ${t('default_terms', 'Default invoice terms', 'Payment due within 14 days. Late payments incur 1.5% monthly interest.')}
   <div class="span2"><button class="btn primary">Save profile</button></div>
 </form>`);
@@ -111,15 +110,15 @@ function connect(user) {
     <li>Open <b>claude.ai</b> (or the desktop app) → <b>Settings → Connectors</b>.</li>
     <li>Click <b>Add custom connector</b>. Name it <b>Paydraft</b>, paste the URL above, and click <b>Add</b>. No OAuth is needed.</li>
     <li>In a new chat, open the <b>+ / tools</b> menu and make sure <b>Paydraft</b> is switched on.</li>
-    <li>Try: <i>"Invoice Acme Robotics for 32 hours of design at $95/hr plus a $240 testing tool, 18% GST."</i></li>
+    <li>Try: <i>"Invoice Acme Robotics for 32 hours of design at ₹2,500/hr plus ₹6,000 for a testing tool."</i></li>
   </ol>
   <h3>Things to ask</h3>
   <ul class="prompts">
     <li>"Set my business profile: Studio Saffron, Bengaluru, GSTIN 29ABCDE1234F1Z5, pay via UPI studio@hdfc."</li>
-    <li>"Write a quote for Northwind: brand refresh, 3 concepts, 2 revision rounds, $4,500."</li>
+    <li>"Write a quote for Northwind: brand refresh, 3 concepts, 2 revision rounds, ₹1,50,000."</li>
     <li>"Who owes me money? Draft a polite reminder for the most overdue one."</li>
-    <li>"Northwind accepted. Convert their quote to an invoice due in 7 days."</li>
-    <li>"Add a 10% loyalty discount to INV-0003 and mark it sent."</li>
+    <li>"Northwind accepted. Turn their quote into an invoice due in 7 days."</li>
+    <li>"Give Acme a ₹5,000 discount on INV-0003."</li>
   </ul>
 </div>`);
 }
@@ -130,9 +129,8 @@ function publicDoc(doc, { justResponded } = {}) {
   const d = doc.data, b = doc.business || {}, t = M.totals(d), cur = d.currency, st = M.effectiveStatus(doc);
   const isQuote = doc.kind === 'quote';
   const rows = d.items.map((it) => `<tr><td>${esc(it.description)}</td><td class="r">${esc(it.quantity)}</td><td class="r">${M.money(it.unit_price, cur)}</td><td class="r">${M.money(it.quantity * it.unit_price, cur)}</td></tr>`).join('');
-  const respond = isQuote && st === 'sent' ? `<form method="post" action="/p/${esc(doc.public_id)}/respond" class="respond no-print">
-     <button class="btn primary" name="decision" value="accept">Accept quote</button>
-     <button class="btn" name="decision" value="decline">Decline</button></form>` : '';
+  const respond = isQuote && st === 'pending' ? `<form method="post" action="/p/${esc(doc.public_id)}/respond" class="respond no-print">
+     <button class="btn primary" name="decision" value="accept">Accept quote</button></form>` : '';
   return `${head(`${doc.number} from ${b.name || doc.owner_name}`)}<body class="public">
 <div class="toolbar no-print"><span>${isQuote ? 'Quote' : 'Invoice'} from <b>${esc(b.name || doc.owner_name)}</b></span><button class="btn" onclick="print()">Download PDF</button></div>
 ${justResponded ? `<div class="banner ok no-print wrap-doc">Thanks, your response has been sent to ${esc(b.name || doc.owner_name)}.</div>` : ''}

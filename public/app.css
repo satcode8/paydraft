@@ -165,3 +165,13 @@ html:has(body.public){background:#e9e5da}
 .paper footer{margin-top:44px;text-align:center}
 @media(max-width:700px){.paper{padding:28px 22px}.meta{grid-template-columns:1fr 1fr}}
 @media print{.no-print{display:none!important}.public{background:#fff}.paper{box-shadow:none;margin:0;padding:0}}
+
+/* v2: simpler layout */
+.stats.two{grid-template-columns:repeat(2,minmax(0,320px))}
+.stat .small{margin-top:2px}
+.s-unpaid,.s-pending{background:var(--blue-2);color:var(--blue)}
+.chip-note{margin-left:auto;font-size:13px;color:var(--muted);align-self:center}
+details.more{margin:6px 0 4px;border-top:1px dashed var(--line2);padding-top:12px}
+details.more summary{cursor:pointer;font-weight:600;font-size:13px;color:var(--green);margin-bottom:12px;list-style:none}
+details.more summary::before{content:'+ '}
+details.more[open] summary::before{content:'− '}

@@ -1,9 +1,20 @@
 // Pure business logic: normalising document data, totals, statuses. No AI anywhere.
 
+// Kept deliberately small: an invoice is unpaid or paid (overdue is derived), a quote is pending or accepted.
 const STATUSES = {
-  invoice: ['draft', 'sent', 'paid', 'void'],
-  quote: ['draft', 'sent', 'accepted', 'declined', 'converted'],
+  invoice: ['unpaid', 'paid'],
+  quote: ['pending', 'accepted'],
 };
+const DEFAULT_STATUS = { invoice: 'unpaid', quote: 'pending' };
+// Map older / synonym values onto the simple set.
+const LEGACY = { draft: null, sent: null, void: 'unpaid', declined: 'pending', expired: 'pending', converted: 'accepted', open: null };
+function canonicalStatus(kind, s) {
+  s = String(s || '').toLowerCase();
+  if (STATUSES[kind].includes(s)) return s;
+  if (s in LEGACY) return LEGACY[s] || DEFAULT_STATUS[kind];
+  if (kind === 'quote' && s === 'paid') return 'accepted';
+  return null;
+}
 
 const today = () => new Date().toISOString().slice(0, 10);
 const addDays = (iso, n) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
@@ -34,13 +45,14 @@ function normalise(kind, patch = {}, base = {}) {
       address: str(client.address, 1000),
       tax_id: str(client.tax_id, 100),
     },
-    currency: (str(merged.currency || 'USD', 3) || 'USD').toUpperCase(),
+    currency: (str(merged.currency || 'INR', 3) || 'INR').toUpperCase(),
     issue_date: issue,
     due_date: /^\d{4}-\d{2}-\d{2}$/.test(merged.due_date) ? merged.due_date : defaultDue,
     items: normaliseItems(merged.items),
     discount: Math.max(0, round2(num(merged.discount, 0))),
     tax_rate: Math.min(100, Math.max(0, num(merged.tax_rate, 0))),
-    tax_label: str(merged.tax_label || 'Tax', 40),
+    tax_label: str(merged.tax_label || 'GST', 40),
+    invoice_number: merged.invoice_number ? str(merged.invoice_number, 20) : null,
     notes: str(merged.notes, 4000),
     terms: str(merged.terms, 4000),
     paid_at: merged.paid_at || null,
@@ -59,8 +71,7 @@ function totals(data) {
 // Overdue / expired are derived, not stored.
 function effectiveStatus(doc) {
   const d = doc.data || {};
-  if (doc.kind === 'invoice' && doc.status === 'sent' && d.due_date && d.due_date < today()) return 'overdue';
-  if (doc.kind === 'quote' && doc.status === 'sent' && d.due_date && d.due_date < today()) return 'expired';
+  if (doc.kind === 'invoice' && doc.status === 'unpaid' && d.due_date && d.due_date < today()) return 'overdue';
   return doc.status;
 }
 
@@ -69,8 +80,8 @@ function daysOverdue(doc) {
   return Math.round((Date.parse(today()) - Date.parse(doc.data.due_date)) / 86400000);
 }
 
-function money(amount, currency = 'USD') {
-  try { return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount); }
+function money(amount, currency = 'INR') {
+  try { return new Intl.NumberFormat(currency === 'INR' ? 'en-IN' : 'en-US', { style: 'currency', currency }).format(amount); }
   catch { return `${currency} ${Number(amount).toFixed(2)}`; }
 }
 
@@ -96,10 +107,11 @@ function present(doc) {
     total_formatted: money(t.total, doc.data.currency),
     days_overdue: daysOverdue(doc),
     created_via: doc.created_via,
+    invoice_number: doc.data.invoice_number || null,
     edit_url: `${baseUrl()}/app/doc/${doc.id}`,
     public_url: `${baseUrl()}/p/${doc.public_id}`,
     updated_at: doc.updated_at,
   };
 }
 
-module.exports = { STATUSES, normalise, totals, effectiveStatus, daysOverdue, money, present, baseUrl, today, addDays };
+module.exports = { STATUSES, DEFAULT_STATUS, canonicalStatus, normalise, totals, effectiveStatus, daysOverdue, money, present, baseUrl, today, addDays };

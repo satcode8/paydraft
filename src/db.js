@@ -33,7 +33,7 @@ async function migrate() {
       public_id TEXT UNIQUE NOT NULL,
       kind TEXT NOT NULL CHECK (kind IN ('invoice','quote')),
       number TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'draft',
+      status TEXT NOT NULL DEFAULT 'unpaid',
       data JSONB NOT NULL DEFAULT '{}'::jsonb,
       created_via TEXT NOT NULL DEFAULT 'app',
       source_quote_id INT,
@@ -52,6 +52,10 @@ async function migrate() {
     CREATE INDEX IF NOT EXISTS documents_user_idx ON documents(user_id, updated_at DESC);
     CREATE INDEX IF NOT EXISTS events_doc_idx ON events(document_id, at DESC);
   `);
+  // v2: simple statuses (invoice: unpaid/paid, quote: pending/accepted)
+  await q(`UPDATE documents SET status='unpaid' WHERE kind='invoice' AND status NOT IN ('unpaid','paid')`);
+  await q(`UPDATE documents SET status='accepted' WHERE kind='quote' AND status='converted'`);
+  await q(`UPDATE documents SET status='pending' WHERE kind='quote' AND status NOT IN ('pending','accepted')`);
 }
 
 // ---------- users ----------
@@ -90,7 +94,7 @@ const documents = {
         const doc = await one(
           `INSERT INTO documents(user_id,public_id,kind,number,status,data,created_via,source_quote_id)
            VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-          [userId, token(9), kind, number, extra.status || 'draft', data, via, extra.source_quote_id || null]);
+          [userId, token(9), kind, number, extra.status || (kind === 'quote' ? 'pending' : 'unpaid'), data, via, extra.source_quote_id || null]);
         return doc;
       } catch (e) { if (e.code !== '23505') throw e; }
     }

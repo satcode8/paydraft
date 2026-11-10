@@ -24,12 +24,12 @@ const docFields = {
   client: client,
   items: z.array(item).min(1).describe('Line items. Claude should break the work into clear, billable lines.'),
   title: z.string().optional().describe('Short project title shown on the document, e.g. "Website redesign – Phase 1"'),
-  currency: z.string().length(3).optional().describe('ISO code like USD, INR, SGD, EUR. Defaults to the business default.'),
+  currency: z.string().length(3).optional().describe('ISO code. Defaults to INR (₹). Only set it for foreign clients, e.g. USD.'),
   issue_date: z.string().optional().describe('YYYY-MM-DD, defaults to today'),
   due_date: z.string().optional().describe('YYYY-MM-DD. Invoices default to +14 days, quotes are valid for +30 days'),
   discount: z.number().optional().describe('Flat discount amount (not percent)'),
-  tax_rate: z.number().optional().describe('Percent, e.g. 18 for 18% GST'),
-  tax_label: z.string().optional().describe('e.g. "GST", "VAT", "Sales tax"'),
+  tax_rate: z.number().optional().describe('GST percent. Defaults to 18. Use 0 for exports under LUT or unregistered sellers.'),
+  tax_label: z.string().optional().describe('Defaults to "GST"'),
   notes: z.string().optional().describe('Friendly note to the client shown on the document'),
   terms: z.string().optional().describe('Payment terms / scope assumptions'),
 };
@@ -46,7 +46,7 @@ function buildServer(user) {
   const server = new McpServer(
     { name: 'paydraft', version: '1.0.0' },
     { instructions:
-      'Paydraft stores, edits and publishes invoices and quotes for this user. You (Claude) write the content: ' +
+      'Paydraft stores, edits and publishes invoices and quotes for this user. Amounts are in Indian rupees (INR) with 18% GST by default. You (Claude) write the content: ' +
       'turn the user\'s description of work into clean line items, notes and terms, then call create_invoice or create_quote. ' +
       'Always give the user both links you get back: edit_url (their editor) and public_url (what their client sees). ' +
       'Use get_receivables to answer "who owes me money" and to draft payment reminder emails yourself. ' +
@@ -82,8 +82,8 @@ function buildServer(user) {
     server.registerTool(`create_${kind}`, {
       title: `Create ${kind}`,
       description: kind === 'invoice'
-        ? 'Create a new invoice (status draft). Returns the invoice number, totals, an edit link for the user and a public link to send the client.'
-        : 'Create a new quote / estimate (status draft) the client can accept online. Returns totals, edit link and public link.',
+        ? 'Create a new invoice (status: unpaid). Amounts are in rupees (INR) with 18% GST unless told otherwise. Returns the invoice number, totals, an edit link for the user and a client link.'
+        : 'Create a new quote (status: pending) the client can accept online. Amounts in rupees (INR) with 18% GST unless told otherwise. Returns totals, edit link and client link.',
       inputSchema: docFields,
     }, guard(async (args) => {
       const doc = await S.createDoc(await fresh(), kind, args, SOURCE);
@@ -93,7 +93,7 @@ function buildServer(user) {
 
   server.registerTool('list_documents', {
     title: 'List invoices and quotes',
-    description: 'List the user\'s invoices and quotes with status and totals. Statuses: draft, sent, overdue, paid, void (invoices); draft, sent, accepted, declined, expired, converted (quotes).',
+    description: 'List the user\'s invoices and quotes with status and totals. Invoice status: unpaid, overdue (unpaid and past due) or paid. Quote status: pending or accepted.',
     inputSchema: {
       kind: z.enum(['invoice', 'quote']).optional(),
       status: z.string().optional(),
@@ -129,8 +129,8 @@ function buildServer(user) {
 
   server.registerTool('set_status', {
     title: 'Set status',
-    description: 'Mark an invoice as sent / paid / void / draft, or a quote as sent / accepted / declined / draft.',
-    inputSchema: { document: ref, status: z.enum(['draft', 'sent', 'paid', 'void', 'accepted', 'declined']) },
+    description: 'Mark an invoice as paid or unpaid, or a quote as accepted or pending.',
+    inputSchema: { document: ref, status: z.enum(['unpaid', 'paid', 'pending', 'accepted']) },
   }, guard(async ({ document, status }) => ok(M.present(await S.setStatus(await fresh(), document, status, SOURCE)))));
 
   server.registerTool('convert_quote_to_invoice', {
@@ -144,7 +144,7 @@ function buildServer(user) {
 
   server.registerTool('get_receivables', {
     title: 'Who owes me money',
-    description: 'Outstanding, overdue and recently paid totals per currency, plus every overdue invoice with client email and days overdue. Use it to prioritise follow-ups and draft reminder emails.',
+    description: 'Money still to collect, overdue and recently paid totals per currency, plus every overdue invoice with client email and days overdue. Use it to prioritise follow-ups and draft reminder emails.',
     inputSchema: {}, annotations: { readOnlyHint: true },
   }, guard(async () => ok(await S.receivables(await fresh()))));
 
